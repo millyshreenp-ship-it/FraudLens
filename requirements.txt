@@ -1,0 +1,6 @@
+streamlit
+pandas
+anthropic
+kaggle
+networkx
+plotly
