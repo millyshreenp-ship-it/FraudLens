@@ -117,6 +117,7 @@ if __name__ == "__main__":
             print(result["summary"])
             if not result["grounded"]:
                 print(f"[WARNING] Ungrounded numbers: {result['ungrounded_numbers']}")
+                print(f"[WARNING] Ungrounded IDs: {result['ungrounded_ids']}")
         except Exception as e:
             print(f"[ERROR] {e}")
         print()

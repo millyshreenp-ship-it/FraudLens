@@ -145,13 +145,71 @@ def check_grounding(text: str, evidence: dict) -> list:
     back to the source data.
     """
     evidence_numbers = _flatten_numbers(evidence)
-    text_numbers = {float(n.replace(",", "")) for n in re.findall(r"[\d,]+\.?\d*", text)}
+    text_numbers = {float(n.replace(",", "")) for n in re.findall(r"\d[\d,]*\.?\d*", text)}
 
     ungrounded = []
     for n in text_numbers:
         if not any(abs(n - e) < 0.01 for e in evidence_numbers):
             ungrounded.append(n)
     return ungrounded
+
+
+def _flatten_strings(obj) -> set:
+    """Collect every string value found anywhere in a (possibly nested) evidence object."""
+    found = set()
+    if isinstance(obj, dict):
+        for v in obj.values():
+            found |= _flatten_strings(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            found |= _flatten_strings(v)
+    elif isinstance(obj, str):
+        found.add(obj)
+    return found
+
+
+# Matches ID-like tokens: account IDs (ACC_A, ACC-4471, ACC102), transaction
+# IDs (T1, TXN-88213), rule names, etc. - anything that looks like an
+# identifier rather than an ordinary English word, so we don't flag words
+# like "The" or "Account" as ungrounded.
+_ID_PATTERN = re.compile(r"\b[A-Z]{2,}[A-Z0-9_-]*\b")
+
+
+def check_account_ids(text: str, evidence: dict) -> list:
+    """
+    Return a list of ID-like tokens (account IDs, transaction IDs, rule
+    names) found in `text` that do NOT appear anywhere in `evidence`.
+    Empty list = every identifier in the output traces back to the
+    source data.
+    """
+    evidence_strings = _flatten_strings(evidence)
+    candidates = set(_ID_PATTERN.findall(text))
+
+    ungrounded = [c for c in candidates if c not in evidence_strings]
+    return ungrounded
+
+
+def check_grounded(text: str, evidence: dict) -> dict:
+    """
+    Run both grounding checks (numbers + account/transaction IDs) and
+    return a single combined result. Never silently passes - always
+    reports what it found, even if empty.
+
+    Returns:
+        {
+            "grounded": <True/False>,
+            "ungrounded_numbers": [...],
+            "ungrounded_ids": [...]
+        }
+    """
+    ungrounded_numbers = check_grounding(text, evidence)
+    ungrounded_ids = check_account_ids(text, evidence)
+
+    return {
+        "grounded": len(ungrounded_numbers) == 0 and len(ungrounded_ids) == 0,
+        "ungrounded_numbers": ungrounded_numbers,
+        "ungrounded_ids": ungrounded_ids,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +226,8 @@ def explain_evidence(evidence: dict, api_key: str = None) -> dict:
         {
             "summary": <the paragraph>,
             "grounded": <True/False>,
-            "ungrounded_numbers": [<numbers in the text with no source>]
+            "ungrounded_numbers": [<numbers in the text with no source>],
+            "ungrounded_ids": [<account/txn IDs in the text with no source>]
         }
     A caller should treat grounded == False as "do not show this to a
     compliance officer without review."
@@ -201,12 +260,13 @@ def explain_evidence(evidence: dict, api_key: str = None) -> dict:
     text_blocks = [b["text"] for b in data["content"] if b["type"] == "text"]
     summary = "\n".join(text_blocks).strip()
 
-    ungrounded = check_grounding(summary, evidence)
+    grounding = check_grounded(summary, evidence)
 
     return {
         "summary": summary,
-        "grounded": len(ungrounded) == 0,
-        "ungrounded_numbers": ungrounded,
+        "grounded": grounding["grounded"],
+        "ungrounded_numbers": grounding["ungrounded_numbers"],
+        "ungrounded_ids": grounding["ungrounded_ids"],
     }
 
 
@@ -242,6 +302,7 @@ if __name__ == "__main__":
         result = explain_evidence(EXAMPLE_EVIDENCE)
         print(result["summary"])
         if not result["grounded"]:
-            print(f"\n[WARNING] Ungrounded numbers found: {result['ungrounded_numbers']}")
+            print(f"\n[WARNING] Ungrounded numbers: {result['ungrounded_numbers']}")
+            print(f"[WARNING] Ungrounded IDs: {result['ungrounded_ids']}")
     except ValueError as e:
         print(f"Blocked: {e}")
