@@ -529,6 +529,163 @@ def generate_report(evidence: Dict, explanation: str, risk_score: Union[int, flo
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# 7. REPORT EXPORT
+#    Turns generate_report()'s Markdown string into a downloadable file.
+#    Pure formatting on top of pure formatting - no new claims, no model
+#    call, and it only parses the specific Markdown constructs
+#    generate_report() actually emits (h1 "# ", h2 "## ", bullets "- ",
+#    bold "**text**", backtick spans "`text`"). It is not a general
+#    Markdown-to-PDF converter.
+#
+#    fmt="md"  -> writes the Markdown string as-is (fastest MVP option)
+#    fmt="txt" -> writes a plain-text version with the markup stripped
+#    fmt="pdf" -> renders a lightly styled PDF (headings, bullets, a
+#                 colored risk-level label) via reportlab
+# ---------------------------------------------------------------------------
+
+_RISK_COLORS = {
+    "Critical": "#B91C1C",  # red
+    "High": "#C2410C",      # orange
+    "Medium": "#B45309",    # amber
+    "Low": "#15803D",       # green
+}
+
+
+def _strip_markdown(report_md: str) -> str:
+    """Best-effort plain-text version of the report for fmt='txt'."""
+    lines = []
+    for line in report_md.split("\n"):
+        line = re.sub(r"^#{1,6}\s*", "", line)          # headings
+        line = re.sub(r"\*\*(.+?)\*\*", r"\1", line)      # bold
+        line = re.sub(r"`([^`]+)`", r"\1", line)          # code spans
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _inline_markup(text: str) -> str:
+    """Convert the report's Markdown inline syntax into reportlab's XML markup."""
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)               # bold
+    text = re.sub(r"`([^`]+)`", r'<font face="Courier">\1</font>', text)  # code
+    for label, hex_color in _RISK_COLORS.items():
+        text = text.replace(f"<b>{label}</b>", f'<font color="{hex_color}"><b>{label}</b></font>')
+    return text
+
+
+def _markdown_report_to_pdf(report_md: str, output_path: str) -> str:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.lib import colors
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, HRFlowable, ListFlowable, ListItem,
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "FraudLensTitle", parent=styles["Title"],
+        textColor=colors.HexColor("#1E293B"), fontSize=18, spaceAfter=4,
+    )
+    h2_style = ParagraphStyle(
+        "FraudLensH2", parent=styles["Heading2"],
+        textColor=colors.HexColor("#334155"), spaceBefore=14, spaceAfter=6,
+    )
+    body_style = ParagraphStyle(
+        "FraudLensBody", parent=styles["Normal"], fontSize=10, leading=14,
+    )
+
+    doc = SimpleDocTemplate(
+        output_path, pagesize=letter,
+        topMargin=0.75 * inch, bottomMargin=0.75 * inch,
+        leftMargin=0.75 * inch, rightMargin=0.75 * inch,
+    )
+
+    story = []
+    bullet_buffer = []
+
+    def flush_bullets():
+        if bullet_buffer:
+            story.append(ListFlowable(
+                [ListItem(Paragraph(_inline_markup(b), body_style), spaceAfter=3)
+                 for b in bullet_buffer],
+                bulletType="bullet", leftIndent=18,
+            ))
+            bullet_buffer.clear()
+
+    for raw_line in report_md.split("\n"):
+        line = raw_line.rstrip()
+
+        if line.startswith("# "):
+            flush_bullets()
+            story.append(Paragraph(_inline_markup(line[2:]), title_style))
+            story.append(HRFlowable(width="100%", color=colors.HexColor("#CBD5E1"), thickness=1))
+            story.append(Spacer(1, 8))
+        elif line.startswith("## "):
+            flush_bullets()
+            story.append(Paragraph(_inline_markup(line[3:]), h2_style))
+        elif line.startswith("- "):
+            bullet_buffer.append(line[2:])
+        elif line.strip() == "":
+            flush_bullets()
+            story.append(Spacer(1, 4))
+        else:
+            flush_bullets()
+            story.append(Paragraph(_inline_markup(line), body_style))
+
+    flush_bullets()
+    doc.build(story)
+    return output_path
+
+
+def export_report(report_md: str, output_path: str, fmt: str = "pdf") -> str:
+    """
+    Write generate_report()'s Markdown output to a downloadable file.
+
+    Parameters
+    ----------
+    report_md : str
+        Output of generate_report().
+    output_path : str
+        Where to write the file. Its extension is corrected to match
+        `fmt` if they don't already match.
+    fmt : str
+        One of "pdf", "md", "txt". Default "pdf". If reportlab isn't
+        installed and fmt="pdf", raises ImportError with a suggestion to
+        install it or fall back to fmt="md"/"txt" for a quick MVP export.
+
+    Returns
+    -------
+    str : the path actually written to.
+    """
+    fmt = fmt.lower().lstrip(".")
+    if fmt not in ("pdf", "md", "txt"):
+        raise ValueError(f"Unsupported fmt {fmt!r} - use 'pdf', 'md', or 'txt'.")
+
+    base, _ = os.path.splitext(output_path)
+    output_path = f"{base}.{fmt}"
+
+    if fmt == "md":
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(report_md)
+        return output_path
+
+    if fmt == "txt":
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(_strip_markdown(report_md))
+        return output_path
+
+    # fmt == "pdf"
+    try:
+        return _markdown_report_to_pdf(report_md, output_path)
+    except ImportError as e:
+        raise ImportError(
+            "PDF export needs reportlab (`pip install reportlab`). "
+            "For a quick MVP export without it, call "
+            "export_report(report_md, output_path, fmt='md') or fmt='txt' instead."
+        ) from e
+
+
 if __name__ == "__main__":
     try:
         result = explain_evidence(EXAMPLE_EVIDENCE)
@@ -544,5 +701,8 @@ if __name__ == "__main__":
         )
         print("\n" + "=" * 60)
         print(report_md)
+
+        pdf_path = export_report(report_md, "fraud_report_ACC_A", fmt="pdf")
+        print(f"\nWrote {pdf_path}")
     except ValueError as e:
         print(f"Blocked: {e}")

@@ -5,3 +5,5 @@ kaggle
 networkx
 plotly
 python-dotenv
+requests
+reportlab
