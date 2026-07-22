@@ -45,7 +45,7 @@ Ask a question. FraudLens AI parses intent, writes and validates the SQL, runs i
 
 ## Multi-Agent Architecture
 
-FraudLens AI runs seven specialised agents, orchestrated so each hands off a clean, structured output to the next. The MVP runs the pipeline as a straight sequence of Claude calls and Python functions; a stretch goal migrates this to a full LangGraph multi-agent graph.
+FraudLens AI runs seven specialised agents, orchestrated so each hands off a clean, structured output to the next. The MVP runs the pipeline as a straight sequence of Gemini calls and Python functions; a stretch goal migrates this to a full LangGraph multi-agent graph.
 
 ### 1. Intent Agent
 Understands the user's question, extracts the fraud type, time range, and named entities (account IDs, locations, transaction types), and converts the query into structured JSON that every downstream agent can consume.
@@ -96,12 +96,12 @@ The build starts small: get the full pipeline working end to end on Streamlit an
 | Layer | Technology | Notes |
 |---|---|---|
 | Chat UI | Streamlit | Fastest path to a working chat interface for the hackathon timeline |
-| LLM Layer | Anthropic Claude 3.5 / Claude 4 | NL → SQL + intent parsing, and turning computed signals into plain English |
+| LLM Layer | Google Gemini API | NL → SQL + intent parsing, and turning computed signals into plain English |
 | Data & Queries | Pandas / SQLite (sqlite3) | Loads PaySim transactions; simple, zero-setup local database |
 | Graph & Patterns | NetworkX | Detects transfer cycles and builds the account-transaction graph |
 | Visualization | Plotly | Renders the network graph, risk views, and (later) the heatmap |
 | Vector store | Not used in core pipeline | Structured transaction data, not documents; optional stretch: ChromaDB for past investigation notes |
-| Deployment | Hugging Face Spaces | Free, simple git-push deploy for the demo build |
+| Deployment | Streamlit Community Cloud | Free, simple git-push deploy for the demo build |
 | Stretch architecture | PostgreSQL + FastAPI + React + LangGraph | Swap in once the Streamlit version works end to end — don't start here |
 
 **Additional tools & data:**
@@ -109,6 +109,41 @@ The build starts small: get the full pipeline working end to end on Streamlit an
 - PaySim dataset (Kaggle) — synthetic mobile-money transactions, already labelled fraud / not-fraud.
 - IBM Credit Card Fraud dataset — reference / companion dataset.
 - NetworkX + Plotly for all graph algorithms and visualisation.
+
+## Setup & Installation
+
+**Requirements:** Python 3.14, a `GEMINI_API_KEY` (from Google AI Studio) — no GPU needed, since Gemini is called via API rather than run locally. Tested on Windows 11.
+
+1. Clone the repository:
+   ```
+   git clone https://github.com/millyshreenp-ship-it/FraudLens && cd FraudLens
+   ```
+2. Create and activate a virtual environment:
+   ```
+   python -m venv venv && source venv/bin/activate
+   ```
+3. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+4. Set your `GEMINI_API_KEY` as an environment variable — see `SETUP.md` for the full guide.
+5. Load the PaySim data into the `db/` layer as described in `SETUP.md`.
+6. Launch the app:
+   ```
+   streamlit run app.py
+   ```
+7. Run the checks in `SMOKE_TEST.md` to verify the pipeline end to end before demoing. `DEMO_SCRIPT.md` has the rehearsed walkthrough.
+
+### Usage
+
+1. Open the app: https://fraudlens-na3bqfkmu4cptkywpozwpn.streamlit.app/
+2. Type a fraud investigation question in plain English into the chat input.
+3. Review the generated SQL shown alongside the response.
+4. View the network graph with any flagged cycle highlighted.
+5. Read the plain-English, evidence-grounded explanation.
+6. Download the investigation report for the flagged accounts.
+
+*(Full technical details — exact disk space, dependency versions, troubleshooting — are in Section 11 of the project report and in `SETUP.md`.)*
 
 ## Success Metrics
 
@@ -140,7 +175,7 @@ The build starts small: get the full pipeline working end to end on Streamlit an
 | Day | Focus | Deliverable |
 |---|---|---|
 | 1–2 | Load PaySim into SQLite | CSV loaded into a queryable table; first 10 rows verified |
-| 3–4 | Build the NL→SQL step | Function sends question + schema to Claude, returns a valid SQL query; tested on 5 questions |
+| 3–4 | Build the NL→SQL step | Function sends question + schema to Gemini, returns a valid SQL query; tested on 5 questions |
 | 5 | Build the fraud pattern detector | NetworkX function detecting 3-hop circular transfers within a time window |
 | 6 | Add velocity & high-value rules | Simple rule-based checks for rapid transfers and abnormal amounts |
 | 7 | Wire the pipeline together | Question → SQL → results → pattern check → raw findings; 15–20-question test set built |
@@ -149,12 +184,12 @@ The build starts small: get the full pipeline working end to end on Streamlit an
 
 | Day | Focus | Deliverable |
 |---|---|---|
-| 8 | Build the explanation step | Second Claude call turns computed pattern data into a plain-English paragraph |
+| 8 | Build the explanation step | Second Gemini call turns computed pattern data into a plain-English paragraph |
 | 9 | Build the network graph | NetworkX + Plotly graph with the flagged cycle highlighted |
 | 10 | Build the report generator | Findings formatted into a clean markdown/text investigation report |
 | 11 | Assemble the Streamlit app | Chat input, generated SQL shown to user, graph, explanation, downloadable report |
 | 12 | Run the full test set | Accuracy and timing recorded — these become the success-metric numbers |
-| 13 | Deploy to Hugging Face Spaces | Live version running; bugs found in production fixed |
+| 13 | Deploy to Streamlit Community Cloud | Live version running; bugs found in production fixed |
 | 14 | Rehearse the demo | Best 2–3 questions picked, 3–4-minute walkthrough rehearsed end to end |
 
 ## Team & Work Division — 5 Members
@@ -162,7 +197,7 @@ The build starts small: get the full pipeline working end to end on Streamlit an
 Each member owns one clear stage of the pipeline end to end.
 
 **Member A — Conversational Layer Lead**
-Intent Agent, NL-to-SQL Agent, Streamlit chat UI, Claude API integration.
+Intent Agent, NL-to-SQL Agent, Streamlit chat UI, Gemini API integration.
 *Demo role: opening — live question typed, structured intent and generated SQL shown on screen.*
 
 **Member B — Fraud Detection Lead**
@@ -178,7 +213,7 @@ Explanation Agent, Report Agent, Responsible-AI documentation (hallucination gua
 *Demo role: the explanation read-out and downloadable report walkthrough.*
 
 **Member E — Data, Platform & Delivery Lead**
-Database setup and PaySim data loading (SQLite → PostgreSQL stretch), deployment to Hugging Face Spaces, success-metrics tracking and demo rehearsal coordination.
+Database setup and PaySim data loading (SQLite → PostgreSQL stretch), deployment to Streamlit Community Cloud, success-metrics tracking and demo rehearsal coordination.
 *Demo role: deploy/live-demo handling; closes with success metrics and roadmap.*
 
 ## Why This Wins
@@ -201,7 +236,7 @@ Most hackathon teams building a "fraud AI" will wire a chatbot to a dashboard an
 
 ## Supporting Materials
 
-- GitHub repo (created at kickoff), e.g. `github.com/yourteam/fraudlens-ai`
+- GitHub repo (created at kickoff), e.g. `github.com/millyshreenp-ship-it/FraudLens`
 - System architecture diagram (agent pipeline)
 - Dataset: PaySim Synthetic Mobile Money Transactions (Kaggle)
 - Reference dataset: IBM Credit Card Fraud Dataset
